@@ -1,7 +1,127 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recuperar QR Code</title><style>
-body{font:16px system-ui;background:#f2f5fa;color:#1e293b;margin:0;padding:20px}.card{max-width:620px;margin:auto;background:white;padding:24px;border-radius:16px;box-shadow:0 6px 24px #0001}label{display:block;margin:16px 0 6px;font-weight:650}input{width:100%;padding:12px;border:1px solid #bbc5d4;border-radius:8px;font:inherit;box-sizing:border-box}button{background:#2056a0;color:white;border:0;border-radius:8px;padding:12px 16px;font:inherit;font-weight:700;margin-top:14px;cursor:pointer}.small{color:#64748b;font-size:14px;line-height:1.5}.status{padding:12px;margin:12px 0;background:#f1f5f9}.err{background:#fff0f0;color:#8e2020}#result{display:none;text-align:center;border-top:1px solid #ddd;margin-top:24px;padding-top:20px}#qrcode{display:flex;justify-content:center;margin:18px}@media print{body *{visibility:hidden}#result,#result *{visibility:visible}#result{display:block!important;position:absolute;top:0;left:0;width:100%}}</style></head><body><main class="card"><h1>Recuperar meu QR Code</h1><p class="small">Informe o CPF e o código de recuperação recebido no cadastro. Os dois dados são necessários.</p><div id="status" class="status" hidden></div><form id="form"><label for="cpf">CPF cadastrado</label><input id="cpf" inputmode="numeric" maxlength="14" required placeholder="CPF"><label for="secret">Código de recuperação (20 caracteres)</label><input id="secret" autocomplete="off" autocapitalize="characters" spellcheck="false" required minlength="20" maxlength="20" placeholder="A1B2C3D4E5F607182930"><button id="submitBtn">Validar e recuperar QR Code</button></form><section id="result"><h2>QR Code recuperado</h2><strong id="name"></strong><p class="small" id="cpfOut"></p><div id="qrcode"></div><p class="small">Este é o QR Code original. Salve ou imprima.</p><button type="button" onclick="window.print()">Imprimir QR Code</button></section><p class="small"><a href="./index_cadastro_inicial_refeito.html">Voltar ao cadastro</a></p></main><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script><script src="./config.js"></script><script>
-(()=>{const $=id=>document.getElementById(id),cfg=window.EVENTO_CONFIG||{};function digits(v){return String(v||'').replace(/\D/g,'')}function fmt(v){let d=digits(v).slice(0,11);if(d.length>9)return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9);if(d.length>6)return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6);if(d.length>3)return d.slice(0,3)+'.'+d.slice(3);return d}function msg(t,err=false){$('status').hidden=false;$('status').textContent=t;$('status').className='status'+(err?' err':'')}
-$('cpf').addEventListener('input',e=>e.target.value=fmt(e.target.value));$('secret').addEventListener('input',e=>e.target.value=e.target.value.replace(/[^a-f0-9]/gi,'').toUpperCase().slice(0,20));
-$('form').addEventListener('submit',async e=>{e.preventDefault();$('result').style.display='none';let cpf=digits($('cpf').value),recoveryCode=$('secret').value.trim().toUpperCase();if(cpf.length<9||cpf.length>11||recoveryCode.length!==20){msg('Confira o CPF e informe os 20 caracteres do código.',true);return}if(!cfg.url||!cfg.anonKey){msg('Confira config.js.',true);return}$('submitBtn').disabled=true;try{let r=await fetch(cfg.url+'/functions/v1/recuperar-qr',{method:'POST',headers:{'Content-Type':'application/json','apikey':cfg.anonKey,'Authorization':'Bearer '+cfg.anonKey},body:JSON.stringify({cpf,recoveryCode})});let d=await r.json().catch(()=>({}));if(!r.ok||!d.ok){msg(d.message||'Não foi possível validar os dados. Confira ou procure a equipe do evento.',true);return}$('name').textContent=d.name;$('cpfOut').textContent='CPF: '+fmt(cpf);$('qrcode').replaceChildren();new QRCode($('qrcode'),{text:d.qr_token,width:240,height:240});$('result').style.display='block';msg('Dados validados. QR Code recuperado.')}catch{msg('Serviço de recuperação indisponível. Tente mais tarde.',true)}finally{$('submitBtn').disabled=false}});
-})();
-</script></body></html>
+
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const headers = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json",
+};
+
+const reply = (body: Record<string, unknown>, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers });
+
+async function hash(s: string) {
+  const b = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(s)
+  );
+  return Array.from(new Uint8Array(b), x =>
+    x.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers });
+  }
+
+  if (req.method !== "POST") {
+    return reply({ ok: false, message: "Método não permitido." }, 405);
+  }
+
+  const url = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (!url || !key) {
+    return reply({
+      ok: false,
+      message: "Serviço de recuperação não configurado."
+    }, 500);
+  }
+
+  let body: { cpf?: unknown };
+
+  try {
+    body = await req.json();
+  } catch {
+    return reply({ ok: false, message: "Solicitação inválida." }, 400);
+  }
+
+  const cpf = String(body.cpf ?? "").replace(/\D/g, "");
+
+  if (cpf.length < 9 || cpf.length > 11) {
+    return reply({
+      ok: false,
+      message: "Informe um CPF válido."
+    }, 400);
+  }
+
+  const db = createClient(url, key, {
+    auth: { persistSession: false }
+  });
+
+  const ip = (req.headers.get("x-forwarded-for") || "unknown")
+    .split(",")[0]
+    .trim();
+
+  const ipHash = await hash(ip);
+  const cpfHash = await hash(cpf);
+  const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+  const [a, b] = await Promise.all([
+    db.from("qr_recovery_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("ip_hash", ipHash)
+      .gte("attempted_at", since),
+
+    db.from("qr_recovery_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("cpf_hash", cpfHash)
+      .gte("attempted_at", since)
+  ]);
+
+  if (a.error || b.error) {
+    return reply({
+      ok: false,
+      message: "Serviço temporariamente indisponível."
+    }, 503);
+  }
+
+  if ((a.count ?? 0) >= 5 || (b.count ?? 0) >= 5) {
+    return reply({
+      ok: false,
+      message: "Muitas tentativas. Aguarde 15 minutos ou procure a equipe do evento."
+    }, 429);
+  }
+
+  const { error: logError } = await db
+    .from("qr_recovery_attempts")
+    .insert({ ip_hash: ipHash, cpf_hash: cpfHash });
+
+  if (logError) {
+    return reply({
+      ok: false,
+      message: "Serviço temporariamente indisponível."
+    }, 503);
+  }
+
+  const { data, error } = await db
+    .from("participants")
+    .select("name, qr_token")
+    .eq("cpf", cpf)
+    .maybeSingle();
+
+  if (error || !data?.qr_token) {
+    return reply({
+      ok: false,
+      message: "Cadastro não localizado. Confira o CPF ou procure a equipe do evento."
+    }, 404);
+  }
+
+  return reply({
+    ok: true,
+    name: data.name,
+    qr_token: data.qr_token
+  });
+});
