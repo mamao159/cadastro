@@ -1,7 +1,315 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recuperar QR Code</title><style>
-body{font:16px system-ui;background:#f2f5fa;color:#1e293b;margin:0;padding:20px}.card{max-width:620px;margin:auto;background:white;padding:24px;border-radius:16px;box-shadow:0 6px 24px #0001}label{display:block;margin:16px 0 6px;font-weight:650}input{width:100%;padding:12px;border:1px solid #bbc5d4;border-radius:8px;font:inherit;box-sizing:border-box}button{background:#2056a0;color:white;border:0;border-radius:8px;padding:12px 16px;font:inherit;font-weight:700;margin-top:14px;cursor:pointer}.small{color:#64748b;font-size:14px;line-height:1.5}.status{padding:12px;margin:12px 0;background:#f1f5f9}.err{background:#fff0f0;color:#8e2020}#result{display:none;text-align:center;border-top:1px solid #ddd;margin-top:24px;padding-top:20px}#qrcode{display:flex;justify-content:center;margin:18px}@media print{body *{visibility:hidden}#result,#result *{visibility:visible}#result{display:block!important;position:absolute;top:0;left:0;width:100%}}</style></head><body><main class="card"><h1>Recuperar meu QR Code</h1><p class="small">Informe o CPF e o código de recuperação recebido no cadastro. Os dois dados são necessários.</p><div id="status" class="status" hidden></div><form id="form"><label for="cpf">CPF cadastrado</label><input id="cpf" inputmode="numeric" maxlength="14" required placeholder="CPF"><label for="secret">Código de recuperação (20 caracteres)</label><input id="secret" autocomplete="off" autocapitalize="characters" spellcheck="false" required minlength="20" maxlength="20" placeholder="A1B2C3D4E5F607182930"><button id="submitBtn">Validar e recuperar QR Code</button></form><section id="result"><h2>QR Code recuperado</h2><strong id="name"></strong><p class="small" id="cpfOut"></p><div id="qrcode"></div><p class="small">Este é o QR Code original. Salve ou imprima.</p><button type="button" onclick="window.print()">Imprimir QR Code</button></section><p class="small"><a href="./index_cadastro_inicial_refeito.html">Voltar ao cadastro</a></p></main><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script><script src="./config.js"></script><script>
-(()=>{const $=id=>document.getElementById(id),cfg=window.EVENTO_CONFIG||{};function digits(v){return String(v||'').replace(/\D/g,'')}function fmt(v){let d=digits(v).slice(0,11);if(d.length>9)return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9);if(d.length>6)return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6);if(d.length>3)return d.slice(0,3)+'.'+d.slice(3);return d}function msg(t,err=false){$('status').hidden=false;$('status').textContent=t;$('status').className='status'+(err?' err':'')}
-$('cpf').addEventListener('input',e=>e.target.value=fmt(e.target.value));$('secret').addEventListener('input',e=>e.target.value=e.target.value.replace(/[^a-f0-9]/gi,'').toUpperCase().slice(0,20));
-$('form').addEventListener('submit',async e=>{e.preventDefault();$('result').style.display='none';let cpf=digits($('cpf').value),recoveryCode=$('secret').value.trim().toUpperCase();if(cpf.length<9||cpf.length>11||recoveryCode.length!==20){msg('Confira o CPF e informe os 20 caracteres do código.',true);return}if(!cfg.url||!cfg.anonKey){msg('Confira config.js.',true);return}$('submitBtn').disabled=true;try{let r=await fetch(cfg.url+'/functions/v1/recuperar-qr',{method:'POST',headers:{'Content-Type':'application/json','apikey':cfg.anonKey,'Authorization':'Bearer '+cfg.anonKey},body:JSON.stringify({cpf,recoveryCode})});let d=await r.json().catch(()=>({}));if(!r.ok||!d.ok){msg(d.message||'Não foi possível validar os dados. Confira ou procure a equipe do evento.',true);return}$('name').textContent=d.name;$('cpfOut').textContent='CPF: '+fmt(cpf);$('qrcode').replaceChildren();new QRCode($('qrcode'),{text:d.qr_token,width:240,height:240});$('result').style.display='block';msg('Dados validados. QR Code recuperado.')}catch{msg('Serviço de recuperação indisponível. Tente mais tarde.',true)}finally{$('submitBtn').disabled=false}});
-})();
-</script></body></html>
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recuperar QR Code</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f3f5f9;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #263248;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 460px;
+      padding: 30px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 5px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      text-align: center;
+      font-size: 25px;
+      color: #183b66;
+    }
+
+    .intro {
+      margin: 0 0 24px;
+      text-align: center;
+      line-height: 1.5;
+      color: #596579;
+      font-size: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px;
+      border: 1px solid #ccd3df;
+      border-radius: 8px;
+      font-size: 16px;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #2463a6;
+      box-shadow: 0 0 0 3px rgba(36, 99, 166, 0.12);
+    }
+
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      background: #205b99;
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #174778;
+    }
+
+    button:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #eef3f8;
+      font-size: 14px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .result {
+      display: none;
+      margin-top: 24px;
+      text-align: center;
+      border-top: 1px solid #e1e6ee;
+      padding-top: 24px;
+    }
+
+    #name {
+      font-weight: bold;
+      margin-bottom: 16px;
+    }
+
+    #qrcode {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      margin: 0 auto 16px;
+      min-height: 20px;
+    }
+
+    #qrcode img,
+    #qrcode canvas {
+      max-width: 100%;
+      height: auto;
+    }
+
+    .note {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #596579;
+    }
+
+    .back {
+      display: block;
+      margin-top: 22px;
+      text-align: center;
+      color: #205b99;
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    .back:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 480px) {
+      .card {
+        padding: 23px 18px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="card">
+    <h1>Recuperar meu QR Code</h1>
+
+    <p class="intro">
+      Informe o CPF cadastrado para recuperar seu QR Code.
+    </p>
+
+    <form id="form">
+      <label for="cpf">CPF cadastrado</label>
+
+      <input
+        id="cpf"
+        type="text"
+        inputmode="numeric"
+        maxlength="14"
+        autocomplete="off"
+        placeholder="000.000.000-00"
+        required
+      >
+
+      <button id="submitBtn" type="submit">
+        Recuperar QR Code
+      </button>
+    </form>
+
+    <div id="status" class="status" role="status" hidden></div>
+
+    <section id="result" class="result">
+      <h2>QR Code recuperado</h2>
+
+      <p id="name"></p>
+
+      <div id="qrcode"></div>
+
+      <p class="note">
+        Apresente este QR Code à equipe do evento para confirmar sua presença.
+      </p>
+    </section>
+
+    <a class="back" href="./index_cadastro_inicial_refeito2.html">
+      Voltar ao cadastro
+    </a>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="./config.js"></script>
+
+  <script>
+    (() => {
+      const $ = id => document.getElementById(id);
+      const cfg = window.EVENTO_CONFIG || {};
+
+      function digits(value) {
+        return String(value || "").replace(/\D/g, "");
+      }
+
+      function formatCPF(value) {
+        const cpf = digits(value).slice(0, 11);
+
+        return cpf
+          .replace(/^(\d{3})(\d)/, "$1.$2")
+          .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+          .replace(/\.(\d{3})(\d)/, ".$1-$2");
+      }
+
+      function showMessage(message, error = false) {
+        $("status").textContent = message;
+        $("status").hidden = false;
+        $("status").style.background = error ? "#fdecec" : "#eaf6ed";
+        $("status").style.color = error ? "#a12626" : "#216638";
+      }
+
+      $("cpf").addEventListener("input", event => {
+        event.target.value = formatCPF(event.target.value);
+      });
+
+      $("form").addEventListener("submit", async event => {
+        event.preventDefault();
+
+        $("result").style.display = "none";
+        $("status").hidden = true;
+
+        const cpf = digits($("cpf").value);
+
+        if (cpf.length !== 11) {
+          showMessage("Informe um CPF válido com 11 números.", true);
+          return;
+        }
+
+        if (!cfg.url || !cfg.anonKey) {
+          showMessage("Configuração do serviço indisponível.", true);
+          return;
+        }
+
+        if (typeof QRCode === "undefined") {
+          showMessage("Não foi possível carregar o gerador de QR Code. Verifique sua conexão.", true);
+          return;
+        }
+
+        $("submitBtn").disabled = true;
+        $("submitBtn").textContent = "Consultando...";
+
+        try {
+          const response = await fetch(
+            cfg.url.replace(/\/+$/, "") + "/functions/v1/recuperar-qr",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": cfg.anonKey,
+                "Authorization": "Bearer " + cfg.anonKey
+              },
+              body: JSON.stringify({ cpf })
+            }
+          );
+
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok || !data.ok || !data.qr_token) {
+            showMessage(
+              data.message || "Não foi possível recuperar o QR Code. Código: " + response.status,
+              true
+            );
+            return;
+          }
+
+          $("name").textContent = data.name || "Participante";
+          $("qrcode").replaceChildren();
+
+          new QRCode($("qrcode"), {
+            text: data.qr_token,
+            width: 240,
+            height: 240,
+            correctLevel: QRCode.CorrectLevel.M
+          });
+
+          $("result").style.display = "block";
+          showMessage("QR Code recuperado com sucesso.");
+
+        } catch (error) {
+          showMessage(
+            "Não foi possível conectar ao serviço. Verifique sua conexão e tente novamente.",
+            true
+          );
+          console.error("Erro na recuperação do QR Code:", error);
+        } finally {
+          $("submitBtn").disabled = false;
+          $("submitBtn").textContent = "Recuperar QR Code";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
