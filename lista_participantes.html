@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lista de participantes — Evento</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:1100px;width:calc(100% - 28px);margin:28px auto}
+header{margin-bottom:20px}.tag{font-size:.75rem;font-weight:800;letter-spacing:.1em;color:#315b9a}
+h1{font-size:clamp(1.7rem,5vw,2.3rem);margin:8px 0}p{line-height:1.5;color:#5c6678}
+.panel{background:#fff;border:1px solid #dfe5ef;border-radius:18px;padding:clamp(16px,3vw,24px);margin:16px 0;box-shadow:0 8px 24px #1b2b4509}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.stat{border:1px solid #e2e8f2;border-radius:14px;padding:16px}.stat span{display:block;color:#5c6678;font-size:.9rem}.stat strong{font-size:1.8rem}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
+input,select,button{font:inherit;border-radius:10px;padding:11px 13px}input,select{border:1px solid #ccd5e3;background:#fff;min-width:180px;flex:1}
+button{border:0;cursor:pointer;background:#244d91;color:white;font-weight:700}button.secondary{background:#e8eef8;color:#244d91}
+.status{padding:12px;border-radius:10px;background:#f1f4f9;margin:12px 0}.good{background:#e8f7ee;color:#17643a}.bad{background:#fff0ef;color:#9f2820}
+.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:620px}th,td{text-align:left;padding:12px;border-bottom:1px solid #e8edf4}th{background:#f7f9fc;color:#455166;font-size:.9rem}tbody tr:hover{background:#fafcff}
+.pill{display:inline-block;padding:5px 9px;border-radius:99px;font-size:.82rem;font-weight:750}.yes{background:#e8f7ee;color:#17643a}.no{background:#fff2d8;color:#805400}
+.small{font-size:.85rem}footer{font-size:.82rem;color:#6a7382;margin:24px 0}
+@media(max-width:600px){.stats{grid-template-columns:1fr}.controls>*{width:100%}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header><span class="tag">ORGANIZAÇÃO DO EVENTO</span><h1>Lista de participantes</h1>
+<p>Consulte quem está inscrito, quem já teve a presença confirmada e quem ainda está pendente.</p></header>
+<section class="stats">
+<div class="stat"><span>Total de inscritos</span><strong id="total">—</strong></div>
+<div class="stat"><span>Presença confirmada</span><strong id="confirmed">—</strong></div>
+<div class="stat"><span>Aguardando presença</span><strong id="pending">—</strong></div>
+</section>
+<section class="panel">
+<div class="controls">
+<input id="search" type="search" placeholder="Buscar por nome ou município">
+<select id="filter" aria-label="Filtrar por presença">
+<option value="all">Todos os participantes</option><option value="yes">Presença confirmada</option><option value="no">Presença pendente</option>
+</select>
+<button id="refresh">Atualizar lista</button><button id="csv" class="secondary">Exportar CSV</button>
+</div>
+<div id="message" class="status">Carregando participantes...</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Nome</th><th>Município</th><th>Situação</th><th>Data da presença</th></tr></thead>
+<tbody id="rows"><tr><td colspan="4">Carregando...</td></tr></tbody>
+</table></div>
+<p id="count" class="small"></p>
+</section>
+<footer>Esta página não exibe CPF. Como não há senha, qualquer pessoa que tenha o endereço desta página poderá consultar os nomes, municípios e a situação de presença.</footer>
+</main>
+<script src="./config.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let participants=[];
+function showMessage(t,type=''){$('message').textContent=t;$('message').className='status '+type}
+function date(t){return t?new Date(t).toLocaleString('pt-BR'):'—'}
+function csvCell(v){return '"'+String(v??'').replace(/"/g,'""')+'"'}
+function render(){
+ const q=$('search').value.trim().toLocaleLowerCase('pt-BR');
+ const f=$('filter').value;
+ const filtered=participants.filter(p=>{
+   const text=((p.name||'')+' '+(p.municipality||'')).toLocaleLowerCase('pt-BR');
+   return (!q||text.includes(q))&&(f==='all'||(f==='yes'&&p.presence_confirmed)||(f==='no'&&!p.presence_confirmed));
+ });
+ $('total').textContent=participants.length;
+ $('confirmed').textContent=participants.filter(p=>p.presence_confirmed).length;
+ $('pending').textContent=participants.filter(p=>!p.presence_confirmed).length;
+ $('rows').innerHTML='';
+ if(!filtered.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.textContent='Nenhum participante encontrado.';tr.appendChild(td);$('rows').appendChild(tr);}
+ for(const p of filtered){
+  const tr=document.createElement('tr');
+  for(const value of [p.name||'—',p.municipality||'Não informado']){
+   const td=document.createElement('td');td.textContent=value;tr.appendChild(td);
+  }
+  const status=document.createElement('td'),pill=document.createElement('span');
+  pill.className='pill '+(p.presence_confirmed?'yes':'no');pill.textContent=p.presence_confirmed?'Confirmada':'Pendente';status.appendChild(pill);tr.appendChild(status);
+  const dt=document.createElement('td');dt.textContent=p.presence_confirmed?date(p.presence_at):'—';tr.appendChild(dt);
+  $('rows').appendChild(tr);
+ }
+ $('count').textContent=`Exibindo ${filtered.length} de ${participants.length} participantes.`;
+}
+async function load(){
+ $('refresh').disabled=true;showMessage('Carregando participantes do Supabase...');
+ try{
+  const cfg=window.EVENTO_CONFIG;
+  if(!cfg||!cfg.url||!cfg.anonKey||cfg.url.includes('COLE_A_')||cfg.anonKey.includes('COLE_A_'))throw Error('O arquivo config.js não está configurado com a URL e a chave pública do Supabase.');
+  const response=await fetch(cfg.url.replace(/\/$/,'')+'/rest/v1/rpc/event_list_participants',{
+   method:'POST',headers:{'apikey':cfg.anonKey,'Authorization':'Bearer '+cfg.anonKey,'Content-Type':'application/json'},body:'{}'
+  });
+  const data=await response.json().catch(()=>null);
+  if(!response.ok)throw Error(data?.message||'Erro HTTP '+response.status+'. Execute o SQL fornecido no pacote.');
+  participants=Array.isArray(data)?data:[];
+  participants.sort((a,b)=>(a.name||'').localeCompare(b.name||'','pt-BR'));
+  render();showMessage('Lista atualizada com sucesso.','good');
+ }catch(e){showMessage('Não foi possível carregar a lista: '+e.message,'bad');$('rows').innerHTML='<tr><td colspan="4">Verifique o arquivo config.js e se executou o SQL no Supabase.</td></tr>';}
+ finally{$('refresh').disabled=false;}
+}
+$('search').addEventListener('input',render);$('filter').addEventListener('change',render);$('refresh').addEventListener('click',load);
+$('csv').addEventListener('click',()=>{
+ const q=$('search').value.trim().toLocaleLowerCase('pt-BR'),f=$('filter').value;
+ const list=participants.filter(p=>{const t=((p.name||'')+' '+(p.municipality||'')).toLocaleLowerCase('pt-BR');return(!q||t.includes(q))&&(f==='all'||(f==='yes'&&p.presence_confirmed)||(f==='no'&&!p.presence_confirmed));});
+ const lines=[['Nome','Município','Situação','Data da presença'].map(csvCell).join(';'),...list.map(p=>[p.name,p.municipality,p.presence_confirmed?'Confirmada':'Pendente',p.presence_confirmed?date(p.presence_at):''].map(csvCell).join(';'))];
+ const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='lista_participantes.csv';a.click();URL.revokeObjectURL(url);
+});
+load();
+</script>
+</body></html>
