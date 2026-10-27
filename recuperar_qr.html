@@ -1,127 +1,267 @@
 
-import { createClient } from "npm:@supabase/supabase-js@2";
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recuperar QR Code</title>
 
-const headers = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Content-Type": "application/json",
-};
+  <style>
+    body {
+      font: 16px system-ui, sans-serif;
+      background: #f2f5fa;
+      color: #1e293b;
+      margin: 0;
+      padding: 20px;
+    }
 
-const reply = (body: Record<string, unknown>, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers });
+    .card {
+      max-width: 620px;
+      margin: auto;
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 6px 24px #0001;
+    }
 
-async function hash(s: string) {
-  const b = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(s)
-  );
-  return Array.from(new Uint8Array(b), x =>
-    x.toString(16).padStart(2, "0")
-  ).join("");
-}
+    label {
+      display: block;
+      margin: 16px 0 6px;
+      font-weight: 650;
+    }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers });
-  }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #bbc5d4;
+      border-radius: 8px;
+      font: inherit;
+      box-sizing: border-box;
+    }
 
-  if (req.method !== "POST") {
-    return reply({ ok: false, message: "Método não permitido." }, 405);
-  }
+    button {
+      background: #2056a0;
+      color: white;
+      border: 0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font: inherit;
+      font-weight: 700;
+      margin-top: 14px;
+      cursor: pointer;
+    }
 
-  const url = Deno.env.get("SUPABASE_URL");
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
 
-  if (!url || !key) {
-    return reply({
-      ok: false,
-      message: "Serviço de recuperação não configurado."
-    }, 500);
-  }
+    .small {
+      color: #64748b;
+      font-size: 14px;
+      line-height: 1.5;
+    }
 
-  let body: { cpf?: unknown };
+    .status {
+      padding: 12px;
+      margin: 12px 0;
+      background: #f1f5f9;
+    }
 
-  try {
-    body = await req.json();
-  } catch {
-    return reply({ ok: false, message: "Solicitação inválida." }, 400);
-  }
+    .err {
+      background: #fff0f0;
+      color: #8e2020;
+    }
 
-  const cpf = String(body.cpf ?? "").replace(/\D/g, "");
+    #result {
+      display: none;
+      text-align: center;
+      border-top: 1px solid #ddd;
+      margin-top: 24px;
+      padding-top: 20px;
+    }
 
-  if (cpf.length < 9 || cpf.length > 11) {
-    return reply({
-      ok: false,
-      message: "Informe um CPF válido."
-    }, 400);
-  }
+    #qrcode {
+      display: flex;
+      justify-content: center;
+      margin: 18px;
+    }
 
-  const db = createClient(url, key, {
-    auth: { persistSession: false }
-  });
+    @media print {
+      body * {
+        visibility: hidden;
+      }
 
-  const ip = (req.headers.get("x-forwarded-for") || "unknown")
-    .split(",")[0]
-    .trim();
+      #result, #result * {
+        visibility: visible;
+      }
 
-  const ipHash = await hash(ip);
-  const cpfHash = await hash(cpf);
-  const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+      #result {
+        display: block !important;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
 
-  const [a, b] = await Promise.all([
-    db.from("qr_recovery_attempts")
-      .select("id", { count: "exact", head: true })
-      .eq("ip_hash", ipHash)
-      .gte("attempted_at", since),
+<body>
+  <main class="card">
+    <h1>Recuperar meu QR Code</h1>
 
-    db.from("qr_recovery_attempts")
-      .select("id", { count: "exact", head: true })
-      .eq("cpf_hash", cpfHash)
-      .gte("attempted_at", since)
-  ]);
+    <p class="small">
+      Informe o CPF cadastrado para recuperar seu QR Code.
+    </p>
 
-  if (a.error || b.error) {
-    return reply({
-      ok: false,
-      message: "Serviço temporariamente indisponível."
-    }, 503);
-  }
+    <div id="status" class="status" hidden></div>
 
-  if ((a.count ?? 0) >= 5 || (b.count ?? 0) >= 5) {
-    return reply({
-      ok: false,
-      message: "Muitas tentativas. Aguarde 15 minutos ou procure a equipe do evento."
-    }, 429);
-  }
+    <form id="form">
+      <label for="cpf">CPF cadastrado</label>
+      <input
+        id="cpf"
+        inputmode="numeric"
+        maxlength="14"
+        autocomplete="off"
+        required
+        placeholder="Digite seu CPF"
+      >
 
-  const { error: logError } = await db
-    .from("qr_recovery_attempts")
-    .insert({ ip_hash: ipHash, cpf_hash: cpfHash });
+      <button id="submitBtn" type="submit">
+        Recuperar QR Code
+      </button>
+    </form>
 
-  if (logError) {
-    return reply({
-      ok: false,
-      message: "Serviço temporariamente indisponível."
-    }, 503);
-  }
+    <section id="result">
+      <h2>QR Code recuperado</h2>
+      <strong id="name"></strong>
 
-  const { data, error } = await db
-    .from("participants")
-    .select("name, qr_token")
-    .eq("cpf", cpf)
-    .maybeSingle();
+      <div id="qrcode"></div>
 
-  if (error || !data?.qr_token) {
-    return reply({
-      ok: false,
-      message: "Cadastro não localizado. Confira o CPF ou procure a equipe do evento."
-    }, 404);
-  }
+      <p class="small">
+        Este é o QR Code do cadastro. Salve ou imprima.
+      </p>
 
-  return reply({
-    ok: true,
-    name: data.name,
-    qr_token: data.qr_token
-  });
-});
+      <button type="button" onclick="window.print()">
+        Imprimir QR Code
+      </button>
+    </section>
+
+    <p class="small">
+      <a href="./index_cadastro_inicial_refeito2.html">
+        Voltar ao cadastro
+      </a>
+    </p>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="./config.js"></script>
+
+  <script>
+    (() => {
+      const $ = id => document.getElementById(id);
+      const cfg = window.EVENTO_CONFIG || {};
+
+      function digits(value) {
+        return String(value || "").replace(/\D/g, "");
+      }
+
+      function formatCPF(value) {
+        const d = digits(value).slice(0, 11);
+
+        if (d.length > 9)
+          return d.slice(0, 3) + "." + d.slice(3, 6) + "." +
+            d.slice(6, 9) + "-" + d.slice(9);
+
+        if (d.length > 6)
+          return d.slice(0, 3) + "." + d.slice(3, 6) +
+            "." + d.slice(6);
+
+        if (d.length > 3)
+          return d.slice(0, 3) + "." + d.slice(3);
+
+        return d;
+      }
+
+      function showMessage(text, error = false) {
+        $("status").hidden = false;
+        $("status").textContent = text;
+        $("status").className = "status" + (error ? " err" : "");
+      }
+
+      $("cpf").addEventListener("input", event => {
+        event.target.value = formatCPF(event.target.value);
+      });
+
+      $("form").addEventListener("submit", async event => {
+        event.preventDefault();
+
+        $("result").style.display = "none";
+
+        const cpf = digits($("cpf").value);
+
+        if (cpf.length < 9 || cpf.length > 11) {
+          showMessage("Confira o CPF informado.", true);
+          return;
+        }
+
+        if (!cfg.url || !cfg.anonKey) {
+          showMessage("Não foi possível configurar o serviço.", true);
+          return;
+        }
+
+        $("submitBtn").disabled = true;
+        $("submitBtn").textContent = "Consultando...";
+
+        try {
+          const response = await fetch(
+            cfg.url + "/functions/v1/recuperar-qr",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": cfg.anonKey,
+                "Authorization": "Bearer " + cfg.anonKey
+              },
+              body: JSON.stringify({ cpf })
+            }
+          );
+
+          const data = await response.json().catch(() => ({}));
+
+          if (!response.ok || !data.ok || !data.qr_token) {
+            showMessage(
+              data.message || "Não foi possível recuperar o QR Code.",
+              true
+            );
+            return;
+          }
+
+          $("name").textContent = data.name || "Participante";
+          $("qrcode").replaceChildren();
+
+          new QRCode($("qrcode"), {
+            text: data.qr_token,
+            width: 240,
+            height: 240
+          });
+
+          $("result").style.display = "block";
+          showMessage("QR Code recuperado.");
+
+        } catch (error) {
+          showMessage(
+            "Serviço indisponível. Tente novamente mais tarde.",
+            true
+          );
+        } finally {
+          $("submitBtn").disabled = false;
+          $("submitBtn").textContent = "Recuperar QR Code";
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
+
