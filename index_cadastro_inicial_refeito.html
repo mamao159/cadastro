@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2056a0">
+<title>Cadastro de participantes</title>
+<style>
+:root{--blue:#2056a0;--bg:#f2f5fa;--ink:#1e293b;--muted:#64748b;--line:#d8e0eb}
+*{box-sizing:border-box}body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:24px}.wrap{max-width:620px;margin:auto}.card{background:#fff;border-radius:16px;padding:24px;box-shadow:0 6px 24px #0001}h1{margin-top:0;font-size:clamp(1.4rem,4vw,2rem)}label{display:block;margin:16px 0 6px;font-weight:650}input{width:100%;padding:13px;border:1px solid #bbc5d4;border-radius:8px;font:inherit}button{background:var(--blue);color:#fff;border:0;border-radius:8px;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer;margin-top:16px}button:disabled{opacity:.6;cursor:wait}.small{color:var(--muted);font-size:14px;line-height:1.45}.status{display:none;padding:12px;border-radius:8px;margin:12px 0;white-space:pre-wrap}.status.show{display:block}.status.ok{background:#e7f6ed;color:#155c38}.status.err{background:#fff0f0;color:#8e2020}#result{display:none;text-align:center;border-top:1px solid #ddd;margin-top:24px;padding-top:20px}#qrcode{display:flex;justify-content:center;margin:18px auto}#qrcode canvas,#qrcode img{max-width:100%;height:auto}.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}.secondary{background:#475569}@media(max-width:520px){body{padding:12px}.card{padding:18px}}@media print{body *{visibility:hidden}#result,#result *{visibility:visible}#result{position:absolute;left:0;top:0;width:100%;border:0}}
+</style>
+</head>
+<body>
+<div class="wrap"><main class="card">
+<h1>Cadastro de participantes</h1>
+<p class="small">Informe o nome e o CPF para registrar o participante e gerar o QR Code.</p>
+<div id="status" class="status" role="status" aria-live="polite"></div>
+<form id="form">
+<label for="nome">Nome completo</label>
+<input id="nome" autocomplete="name" required maxlength="150" placeholder="Nome completo">
+<label for="cpf">CPF (modo de teste)</label>
+<input id="cpf" inputmode="numeric" autocomplete="off" required maxlength="14" placeholder="Ex.: 000000000">
+<p class="small">Modo de teste: aceita de 9 a 11 números, sem validar os dígitos verificadores. O mesmo CPF não pode ser cadastrado duas vezes.</p>
+<button id="submitBtn" type="submit">Cadastrar e gerar QR Code</button>
+</form>
+<section id="result">
+<h2>Cadastro realizado!</h2><strong id="outNome"></strong><p id="outCpf" class="small"></p><div id="qrcode"></div>
+<p class="small">Apresente este QR Code à equipe responsável. Ele contém um identificador aleatório, não o CPF.</p>
+<div class="actions"><button type="button" id="printBtn">Imprimir QR Code</button><button type="button" id="newBtn" class="secondary">Novo cadastro</button></div>
+</section>
+<p class="small">Este formulário não pede e-mail, senha nem município. Para compatibilidade com a tabela atual, o município é salvo internamente como “Não informado”.</p>
+</main></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="./config.js"></script>
+<script>
+(()=>{
+ const $=id=>document.getElementById(id),cfg=window.EVENTO_CONFIG||{};let sb=null;
+ function status(msg,error=false){$('status').textContent=msg;$('status').className='status show '+(error?'err':'ok')}
+ function digits(v){return String(v||'').replace(/\D/g,'')}
+ function formatCPF(v){const d=digits(v).slice(0,11);if(d.length<=3)return d;if(d.length<=6)return d.slice(0,3)+'.'+d.slice(3);if(d.length<=9)return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6);return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9)}
+ function uuid(){if(crypto.randomUUID)return crypto.randomUUID();const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=(a[6]&15)|64;a[8]=(a[8]&63)|128;const h=Array.from(a,x=>x.toString(16).padStart(2,'0')).join('');return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20)}
+ function init(){if(!window.supabase){status('Não foi possível carregar a biblioteca do Supabase. Confira a conexão e atualize a página.',true);$('submitBtn').disabled=true;return}if(!cfg.url||!cfg.anonKey){status('Não encontrei a configuração. Confira se config.js está na mesma pasta deste HTML.',true);$('submitBtn').disabled=true;return}try{sb=window.supabase.createClient(cfg.url,cfg.anonKey);$('status').className='status'}catch(e){status('Erro na configuração do Supabase: '+e.message,true);$('submitBtn').disabled=true}}
+ $('cpf').addEventListener('input',e=>{e.target.value=formatCPF(e.target.value)});
+ $('form').addEventListener('submit',async e=>{
+  e.preventDefault();$('result').style.display='none';
+  const nome=$('nome').value.trim().replace(/\s+/g,' '),cpf=digits($('cpf').value);
+  if(nome.length<3){status('Informe o nome completo.',true);return}
+  if(cpf.length<9||cpf.length>11){status('Para teste, informe de 9 a 11 números no CPF. Exemplo: 000000000.',true);return}
+  if(!sb){status('Conexão com o banco indisponível. Confira config.js e atualize a página.',true);return}
+  if(typeof QRCode==='undefined'){status('A biblioteca de QR Code não carregou. Confira a internet e atualize a página.',true);return}
+  $('submitBtn').disabled=true;$('submitBtn').textContent='Salvando cadastro…';
+  const tokenUsado=uuid();
+  const {error}=await sb.from('participants').insert({name:nome,cpf:cpf,municipality:'Não informado',qr_token:tokenUsado});
+  $('submitBtn').disabled=false;$('submitBtn').textContent='Cadastrar e gerar QR Code';
+  if(error){if(error.code==='23505'){status('Este CPF já está cadastrado. Use outro CPF para o próximo teste.',true)}else if(error.code==='42501'||error.code==='PGRST301'){status('O banco recusou o cadastro por falta de permissão de inserção pública. É preciso ajustar a política RLS no Supabase.',true)}else{status('Não foi possível salvar no banco: '+error.message+' (código '+(error.code||'sem código')+').',true)}return}
+  $('outNome').textContent=nome;$('outCpf').textContent='CPF de teste: '+formatCPF(cpf);$('qrcode').replaceChildren();
+  new QRCode($('qrcode'),{text:tokenUsado,width:240,height:240,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  $('result').style.display='block';status('Cadastro salvo no banco central e QR Code gerado.');$('result').scrollIntoView({behavior:'smooth',block:'start'});
+ });
+ $('printBtn').addEventListener('click',()=>window.print());$('newBtn').addEventListener('click',()=>{$('form').reset();$('result').style.display='none';$('status').className='status';$('nome').focus()});
+ init();
+})();
+</script>
+</body></html>
